@@ -1,0 +1,24 @@
+body {
+    background-color: black;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    align-items: center;
+    justify-content: center;
+}
+
+body .canvas-wrapper {
+    width: 80vw;
+    height: 80vh;
+    overflow: hidden;
+}
+
+body canvas {
+    height: 80vh;
+}
