@@ -25,8 +25,11 @@ export interface IProgressData{
 	percent:number
 }
 
-interface IOutlinePass{
-	selectedObjects:Array<THREE.Intersection>;
+export interface IUploadingModel{
+	id:string,
+	modelpath:string,
+	texturepath?:string,
+	isinteractive?:boolean
 }
 
 class App{
@@ -45,16 +48,20 @@ class App{
 	debug:boolean;
 	raycaster:Raycaster;
 	outlinepass:OutlinePass;
-	outputpass:OutputPass
+	outputpass:OutputPass;
+	renderpass:RenderPass;
 	composer:EffectComposer;
 	effectFXAA:any;
-	outlinepassinfo:IOutlinePass;
 	container:HTMLElement;
 
 	mousepos:IMousePos;
+	mouseStartPos = [0, 0];
+	mouseEndPos = [0, 0];
+
+	mousePressed:boolean;
 
 
-	highlightedObjects:Array<THREE.Intersection> = [];
+	selectedObjects:Array<THREE.Object3D> = [];
 
 	/**
 	 * Инициализация приложения ThreeJS
@@ -63,19 +70,19 @@ class App{
 	 */
 	constructor(canvas:HTMLCanvasElement, debug:boolean = true){
 
-		this.outlinepassinfo = {
-			selectedObjects: [],
-		}
+		this.canvas = canvas;
+		this.debug = debug;
+
+		window.addEventListener('resize', this.windowResize.bind(this));
+		this.canvas.addEventListener('mousemove', this.updateMouse.bind(this));
+		this.canvas.addEventListener('mousedown', function(){ 
+			this.mousePressed = true 
+		}.bind(this));
+		this.canvas.addEventListener('mouseup', function(){ this.mousePressed = false }.bind(this));
+
+		this.canvas.addEventListener('click', this.alertActive.bind(this));
 
 		this.container = canvas.parentElement;
-
-		window.addEventListener('resize', function(){
-			this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
-			this.camera.aspect = this.container.clientWidth / this.container.clientHeight;
-			this.camera.updateProjectionMatrix();
-		}.bind(this));
-
-		let cameraPosition = new THREE.Vector3(0, 0, 0);
 
 		this.mousepos = {
 			x: 0,
@@ -85,11 +92,11 @@ class App{
 		}
 
 		this.scene = new THREE.Scene();
+		this.raycaster = new THREE.Raycaster();
 
-		this.canvas = canvas;
+		
 		this.makeRenderer();
-
-		this.canvas.addEventListener('mousemove', this.updateMouse.bind(this));
+		
 
 		// this.light = new THREE.DirectionalLight(0xffffff, 1);
 		// this.light.position.set(0, 30, 80);
@@ -107,8 +114,6 @@ class App{
 		this.rotationYHelper = new THREE.Mesh(rotationYGeometry, rotationMaterial);
 		
 		this.scene.add(this.rotationYHelper);
-
-		this.debug = debug;
 
 		if(debug){
 			this.rotationXHelper.visible = true;
@@ -142,25 +147,35 @@ class App{
 			this.controls.target.clamp(min, max);
 			_v.sub(this.controls.target);
 			this.camera.position.sub(_v);
-
 		}.bind(this));
 
 		//== Пост-просесс ===============================================
 
-		// this.composer = new EffectComposer( this.renderer );
+		this.composer = new EffectComposer( this.renderer );
+		this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-		// const renderpass = new RenderPass(this.scene, this.camera);
-		// this.composer.addPass(renderpass);
+		this.renderpass = new RenderPass(this.scene, this.camera);
+		this.composer.addPass(this.renderpass);
 
-		// this.outlinepass = new OutlinePass(new THREE.Vector2(canvas.clientWidth, canvas.clientHeight), this.scene, this.camera);
-		// this.composer.addPass(this.outlinepass);
+		// Подсветка
+		this.outlinepass = new OutlinePass(new THREE.Vector2(window.innerWidth, window.innerHeight), this.scene, this.camera);
+		this.outlinepass.edgeStrength = 1.0;
+		this.outlinepass.edgeGlow = 4.0;
+		this.outlinepass.edgeThickness = 1;
+		this.outlinepass.pulsePeriod = 0;
+		this.outlinepass.usePatternTexture = false;
+		this.outlinepass.visibleEdgeColor.set( 0xffffff );
+		this.outlinepass.hiddenEdgeColor.set( 0x000000 );
+		this.outlinepass.renderToScreen = true;
+		
+		this.composer.addPass(this.outlinepass);
 
-		// this.outputpass = new OutputPass();
-		// this.composer.addPass(this.outputpass);
-
-		// this.effectFXAA = new ShaderPass( FXAAShader );
-		// this.effectFXAA.uniforms[ 'resolution' ].value.set( 1 / canvas.clientWidth, 1 / canvas.clientHeight );
-		// this.composer.addPass( this.effectFXAA );
+		this.effectFXAA = new ShaderPass( FXAAShader );
+		this.effectFXAA.uniforms[ 'resolution' ].value.set(
+			1 / this.container.clientWidth, 
+			1 / this.container.clientHeight 
+		);
+		this.composer.addPass( this.effectFXAA );
 
 		//=/ Пост-процесс ===============================================
 		
@@ -185,12 +200,14 @@ class App{
 			_y: e.clientY,
 			ease: Power1.easeInOut,
 			onUpdate: () => {
-				this.triggerEvent('mousemove', this.mousepos)
+				this.triggerEvent('mousemove', this.mousepos),
+				this.checkIntersection();
 			},
 			onComplete: ()=>{
 				this.triggerEvent('mouseend')
 			}
-		} )
+		} );
+
 	}
 
 	/**
@@ -243,9 +260,11 @@ class App{
 	 * Цикл анимации
 	 */
 	animate(){
-		this.renderer.render(this.scene, this.camera);
 		this.controls.update();
-		this.camera.updateWorldMatrix(false, true);
+		this.camera.aspect = this.container.clientWidth / this.container.clientHeight;
+		// this.renderer.render(this.scene, this.camera);
+		this.composer.render();
+		
 		requestAnimationFrame(this.animate.bind(this));
 		// this.rotationXHelper.rotation.y += .01;
 
@@ -257,14 +276,14 @@ class App{
 	 * @param modelpath {string} - путь к файлу для загрузки
 	 * @param texturepath {string} - путь к файлу текстуры
 	 */
-	loadModel(modelpath:string, texturepath?:string){
+	loadModel(modelData:IUploadingModel){
 
-		if(texturepath){
+		if(modelData.texturepath){
 
 			const textureLoader:THREE.TextureLoader = new TextureLoader();
 	
 			textureLoader.load(
-				texturepath,
+				modelData.texturepath,
 				function(texture:THREE.Texture){
 	
 					if(this.debug){
@@ -279,7 +298,7 @@ class App{
 					loader.preload();
 			
 					loader.load(
-						modelpath,
+						modelData.modelpath,
 						function(geometry:THREE.BufferGeometry){
 							// Успешное завершение загрузки модели
 							this.triggerEvent('model_loaded');
@@ -293,6 +312,8 @@ class App{
 							material.map.minFilter = THREE.LinearFilter;
 	
 							let model = new THREE.Mesh(geometry, material);
+							model.name = modelData.id;
+							(model as any).isInteractive = modelData.isinteractive;
 							this.scene.add(model);
 							model.parent = this.rotationXHelper;
 	
@@ -327,9 +348,11 @@ class App{
 
 			let fbxLoader = new FBXLoader();
 			fbxLoader.load(
-				modelpath,
+				modelData.modelpath,
 				(object:THREE.Group<THREE.Object3DEventMap>) => {
 					this.triggerEvent('model_loaded');
+					object.name = modelData.id;
+					(object as any).isInteractive = modelData.isinteractive;
 					this.scene.add(object);
 					object.parent = this.rotationXHelper;
 				},
@@ -356,35 +379,62 @@ class App{
 	 * Проверка наличия пересечений для луча
 	 */
 	checkIntersection(){
-		let mousePos = new THREE.Vector2[this.mousepos.x, this.mousepos.y];
+
+		if(this.mousePressed) return;
+
+		let mousePos = new THREE.Vector2(this.mousepos.x, this.mousepos.y);
 		this.raycaster.setFromCamera(mousePos, this.camera);
 
 		let intersects = this.raycaster.intersectObject(this.scene, true);
-
+		
+		
 		if(intersects.length > 0){
-			const selectedObject = intersects[0];
-			this.addHighlightedItem(selectedObject);
-			this.outlinepassinfo.selectedObjects = this.highlightedObjects;
+			const selectedObject = intersects[0].object;
+			if((selectedObject as any).isInteractive){
+				this.addHighlightedItem( selectedObject );
+				this.outlinepass.selectedObjects = this.selectedObjects;
+			}else{
+				this.selectedObjects = [];
+				this.outlinepass.selectedObjects = this.selectedObjects;
+			}
+		}else{
+			this.selectedObjects = [];
+			this.outlinepass.selectedObjects = this.selectedObjects;
 		}
+
+		console.log(intersects.length);
 	}
 
 	/**
 	 * Добавление объекта в коллекцию пересечений
 	 * @param object {THREE.Intersection} - объект на пересечении луча
 	 */
-	addHighlightedItem(object:THREE.Intersection){
-		this.highlightedObjects = [];
-		this.highlightedObjects.push(object);
+	addHighlightedItem(object:THREE.Object3D){
+		this.selectedObjects = [];
+		this.selectedObjects.push(object);
+	}
+
+	/**
+	 * Обработка изменения размеров окна
+	 */
+	windowResize(){
+
+		let width = window.innerWidth;
+		let height = window.innerHeight;
+
+		this.renderer.setSize(width, height);
+		this.camera.aspect = width /height;
+		
+		this.camera.updateProjectionMatrix();
+		this.composer.setSize(width, height);
+		
+		this.effectFXAA.uniforms[ 'resolution' ].value.set( 
+			1 / width, 
+			1 / height 
+		);
 	}
 
 	makeRenderer(){
-		// this.renderer = new THREE.WebGLRenderer({
-		// 	canvas: this.canvas, 
-		// 	antialias: true,
-		// 	powerPreference: 'high-performance',
-		// 	logarithmicDepthBuffer: true,
-		// });
-		// this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
 
 		this.renderer = new THREE.WebGLRenderer({
 			canvas: this.canvas,
@@ -403,6 +453,16 @@ class App{
 		const environment = new RoomEnvironment();
 		const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
 		this.scene.environment = pmremGenerator.fromScene(environment).texture;
+	}
+
+	/**
+	 * Отображение активного элемента
+	 */
+	alertActive(){
+		let activeObject = this.selectedObjects[0];
+		if(activeObject){
+			this.triggerEvent("object-clicked", activeObject);
+		}
 	}
 }
 
