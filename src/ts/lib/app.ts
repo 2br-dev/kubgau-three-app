@@ -13,7 +13,7 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass';
 
-import gsap, {Power1} from 'gsap';
+import gsap, {Linear, Power1} from 'gsap';
 
 export interface IMousePos{
 	x:number, y:number, _x:number, _y:number
@@ -28,8 +28,15 @@ export interface IProgressData{
 export interface IUploadingModel{
 	id:string,
 	modelpath:string,
-	texturepath?:string,
+	diffusetexture?:string,
+	alphatexture?:string,
 	isinteractive?:boolean
+	isEmissive?:boolean
+}
+
+export interface IHoverData{
+	object:THREE.Object3D | null,
+	mousePos: IMousePos
 }
 
 class App{
@@ -55,10 +62,11 @@ class App{
 	container:HTMLElement;
 
 	mousepos:IMousePos;
-	mouseStartPos = [0, 0];
-	mouseEndPos = [0, 0];
+	mouseStartPos:IMousePos;
+	mouseEndPos:IMousePos;
 
 	mousePressed:boolean;
+	hasIntersection:boolean;
 
 
 	selectedObjects:Array<THREE.Object3D> = [];
@@ -77,10 +85,15 @@ class App{
 		this.canvas.addEventListener('mousemove', this.updateMouse.bind(this));
 		this.canvas.addEventListener('mousedown', function(){ 
 			this.mousePressed = true 
+			this.mouseStartPos = this.mousepos;
+			this.triggerEvent('mousedown', this.mousepos);
 		}.bind(this));
-		this.canvas.addEventListener('mouseup', function(){ this.mousePressed = false }.bind(this));
-
-		this.canvas.addEventListener('click', this.alertActive.bind(this));
+		this.canvas.addEventListener('mouseup', function(){ 
+			this.mousePressed = false 
+			this.mouseEndPos = this.mousepos
+			this.canvasClick();
+			this.triggerEvent('mouseup', this.mousepos);
+		}.bind(this));
 
 		this.container = canvas.parentElement;
 
@@ -96,12 +109,7 @@ class App{
 
 		
 		this.makeRenderer();
-		
-
-		// this.light = new THREE.DirectionalLight(0xffffff, 1);
-		// this.light.position.set(0, 30, 80);
-		// this.scene.add(this.light);
-
+	
 
 		let rotationXGeometry = new THREE.BoxGeometry(.1, 3, .1);
 		let rotationMaterial = new THREE.MeshBasicMaterial({color: 0xff0000});
@@ -129,13 +137,10 @@ class App{
 		this.controls.maxDistance = 120;
 		this.controls.minDistance = 40;
 		
-		
 		this.controls.minPolarAngle = 0;
 		this.controls.maxPolarAngle = Math.PI/2; 
 		this.controls.minAzimuthAngle = 0;
 		this.controls.maxAzimuthAngle= Math.PI/2;
-
-		
 		
 		let max = new THREE.Vector3(16, 0, 16);
 		let min = new THREE.Vector3(-16, 0, -16);
@@ -165,7 +170,7 @@ class App{
 		this.outlinepass.pulsePeriod = 0;
 		this.outlinepass.usePatternTexture = false;
 		this.outlinepass.visibleEdgeColor.set( 0xffffff );
-		this.outlinepass.hiddenEdgeColor.set( 0x000000 );
+		this.outlinepass.hiddenEdgeColor.set( 0xffffff );
 		this.outlinepass.renderToScreen = true;
 		
 		this.composer.addPass(this.outlinepass);
@@ -192,21 +197,15 @@ class App{
 
 		this.triggerEvent('mousestart', this.mousepos);
 
-		gsap.to( this.mousepos, {
-			duration: .1,
+		this.mousepos = {
 			x: (e.clientX / window.innerWidth) * 2 - 1,
 			y: -(e.clientY / window.innerHeight) * 2 + 1,
 			_x: e.clientX,
-			_y: e.clientY,
-			ease: Power1.easeInOut,
-			onUpdate: () => {
-				this.triggerEvent('mousemove', this.mousepos),
-				this.checkIntersection();
-			},
-			onComplete: ()=>{
-				this.triggerEvent('mouseend')
-			}
-		} );
+			_y: e.clientY
+		}
+
+		this.triggerEvent('mousemove', this.mousepos);
+		this.checkIntersection();
 
 	}
 
@@ -278,101 +277,98 @@ class App{
 	 */
 	loadModel(modelData:IUploadingModel){
 
-		if(modelData.texturepath){
+		const textureLoader:THREE.TextureLoader = new TextureLoader();
 
-			const textureLoader:THREE.TextureLoader = new TextureLoader();
-	
-			textureLoader.load(
-				modelData.texturepath,
-				function(texture:THREE.Texture){
-	
-					if(this.debug){
-						console.info("Текстура успешно загружена");
-					}
-				
-					// Успешное завершение загрузки текстуры
-					const loader:DRACOLoader = new DRACOLoader();
-					loader.setDecoderPath('/draco/');
-					loader.setDecoderConfig({type: 'wasm'});
+		let diffuseTexture:THREE.Texture
+		let alphaTexture:THREE.Texture
+
+		let material;
+
+		
+		if(!modelData.isEmissive){
+
+			material = new THREE.MeshBasicMaterial()
+
+			diffuseTexture = modelData.diffusetexture ? textureLoader.load(modelData.diffusetexture) : null;
+			alphaTexture = modelData.alphatexture ? textureLoader.load(modelData.alphatexture) : null;
+
+			if(modelData.alphatexture != null){
+				material.transparent = true;
+				(material as THREE.MeshBasicMaterial).depthTest = true;
+				(material as THREE.MeshBasicMaterial).depthWrite = true;
+				(material as THREE.MeshBasicMaterial).side = THREE.DoubleSide;
+				material.alphaMap = alphaTexture;
+				alphaTexture.generateMipmaps = false;
+				alphaTexture.minFilter = THREE.LinearFilter;
+				alphaTexture.magFilter = THREE.LinearFilter;
+				alphaTexture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+
+				material.alphaMap = alphaTexture;
+				material.alphaMap.minFilter = THREE.LinearFilter;
+			}
+
+
+			diffuseTexture.generateMipmaps = false;
+			diffuseTexture.minFilter = THREE.LinearFilter;
+			diffuseTexture.magFilter = THREE.LinearFilter;
+			diffuseTexture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+			this.renderer.capabilities.maxTextureSize = 4096;
 			
-					loader.preload();
-			
-					loader.load(
-						modelData.modelpath,
-						function(geometry:THREE.BufferGeometry){
-							// Успешное завершение загрузки модели
-							this.triggerEvent('model_loaded');
-							const material = new THREE.MeshBasicMaterial();
-							texture.generateMipmaps = false;
-							texture.minFilter = THREE.LinearFilter;
-							texture.magFilter = THREE.LinearFilter;
-							texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-							this.renderer.capabilities.maxTextureSize = 4096;
-							material.map = texture;
-							material.map.minFilter = THREE.LinearFilter;
-	
-							let model = new THREE.Mesh(geometry, material);
-							model.name = modelData.id;
-							(model as any).isInteractive = modelData.isinteractive;
-							this.scene.add(model);
-							model.parent = this.rotationXHelper;
-	
-							if(this.debug){
-								console.info("Модель успешно загружена");
-							}
-							
-						}.bind(this),
-						function(xhr:ProgressEvent<EventTarget>){
-							// Процесс загрузки
-							let loadingData:IProgressData = {
-								total: xhr.total,
-								loaded: xhr.loaded,
-								percent: (xhr.loaded / xhr.total) * 100
-							}
-							this.triggerEvent('model_loading', loadingData)
-						}.bind(this),
-						function(err:any){
-							// При возникновении ошибки
-							throw new Error(err);
-						}.bind(this)
-					)
-				}.bind(this),
-				undefined,
-				function( err:any ){
-					// Ошибка загрузки текстуры
-					throw new Error(err);
-				}.bind(this)
-			)
+			material.map = diffuseTexture;
+			material.map.minFilter = THREE.LinearFilter;
+
 
 		}else{
 
-			let fbxLoader = new FBXLoader();
-			fbxLoader.load(
-				modelData.modelpath,
-				(object:THREE.Group<THREE.Object3DEventMap>) => {
-					this.triggerEvent('model_loaded');
-					object.name = modelData.id;
-					(object as any).isInteractive = modelData.isinteractive;
-					this.scene.add(object);
-					object.parent = this.rotationXHelper;
-				},
-				(xhr:ProgressEvent<EventTarget>) => {
-					// Процесс загрузки
-					let loadingData:IProgressData = {
-						total: xhr.total,
-						loaded: xhr.loaded,
-						percent: (xhr.loaded / xhr.total) * 100
-					}
-					this.triggerEvent('model_loading', loadingData)
-				},
-				(err) =>  {
-					throw new Error("Ошибка!")
-					console.error(err);
-				}
-			)
-
+			material = new THREE.MeshPhongMaterial;
+			material.Emissive = 5;
 		}
 
+
+		if(this.debug){
+			console.info("Текстура успешно загружена");
+		}
+	
+		// Успешное завершение загрузки текстуры
+		const loader:DRACOLoader = new DRACOLoader();
+		loader.setDecoderPath('/draco/');
+		loader.setDecoderConfig({type: 'wasm'});
+
+		loader.preload();
+
+		loader.load(
+			modelData.modelpath,
+			function(geometry:THREE.BufferGeometry){
+				// Успешное завершение загрузки модели
+				this.triggerEvent('model_loaded');
+
+
+
+				let model = new THREE.Mesh(geometry, material);
+				model.name = modelData.id;
+				(model as any).isInteractive = modelData.isinteractive;
+				this.scene.add(model);
+				model.parent = this.rotationXHelper;
+
+				if(this.debug){
+					console.info("Модель успешно загружена");
+				}
+				
+			}.bind(this),
+			function(xhr:ProgressEvent<EventTarget>){
+				// Процесс загрузки
+				let loadingData:IProgressData = {
+					total: xhr.total,
+					loaded: xhr.loaded,
+					percent: (xhr.loaded / xhr.total) * 100
+				}
+				this.triggerEvent('model_loading', loadingData)
+			}.bind(this),
+			function(err:any){
+				// При возникновении ошибки
+				throw new Error(err);
+			}.bind(this)
+		)
 	}
 
 	/**
@@ -389,17 +385,38 @@ class App{
 		
 		
 		if(intersects.length > 0){
+
 			const selectedObject = intersects[0].object;
 			if((selectedObject as any).isInteractive){
-				this.addHighlightedItem( selectedObject );
-				this.outlinepass.selectedObjects = this.selectedObjects;
+
+				let already:boolean = false;
+				let selectedObjectsEmpty = this.selectedObjects.length == 0;
+				
+				if(!selectedObjectsEmpty){
+					already = this.selectedObjects[0].name == selectedObject.name;
+				}
+
+				if(!already){
+
+					this.addHighlightedItem( selectedObject );
+					this.outlinepass.selectedObjects = this.selectedObjects;
+					let data:IHoverData = {
+						object : selectedObject,
+						mousePos: this.mousepos
+					}
+					this.triggerEvent("intersect", data);
+				}
+
+
 			}else{
 				this.selectedObjects = [];
 				this.outlinepass.selectedObjects = this.selectedObjects;
+				this.triggerEvent('lost-intersect');
 			}
 		}else{
 			this.selectedObjects = [];
 			this.outlinepass.selectedObjects = this.selectedObjects;
+			this.triggerEvent('lost-intersect');
 		}
 
 		console.log(intersects.length);
@@ -458,11 +475,22 @@ class App{
 	/**
 	 * Отображение активного элемента
 	 */
-	alertActive(){
-		let activeObject = this.selectedObjects[0];
-		if(activeObject){
-			this.triggerEvent("object-clicked", activeObject);
+	canvasClick(){
+
+		let xdiff = Math.abs(this.mouseStartPos._x - this.mouseEndPos._x);
+		let ydiff = Math.abs(this.mouseStartPos._y - this.mouseEndPos._y);
+
+		if (xdiff == 0 && ydiff == 0){
+
+			// Trigger click event
+			let activeObject = this.selectedObjects[0];
+			if(activeObject){
+				this.triggerEvent("object-clicked", activeObject);
+			}
+		}else{
+			this.selectedObjects = [];
 		}
+
 	}
 }
 
