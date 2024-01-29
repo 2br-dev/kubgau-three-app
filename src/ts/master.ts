@@ -27,7 +27,7 @@ import App, {IHoverData, IMousePos, IProgressData} from './lib/app';
 
 	let environments = [
 		"room",
-		"man",
+		"office-woman",
 		"girl",
 		"cube-green",
 		"cube-white",

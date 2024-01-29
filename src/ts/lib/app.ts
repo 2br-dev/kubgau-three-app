@@ -175,12 +175,12 @@ class App{
 		
 		this.composer.addPass(this.outlinepass);
 
-		this.effectFXAA = new ShaderPass( FXAAShader );
-		this.effectFXAA.uniforms[ 'resolution' ].value.set(
-			1 / this.container.clientWidth, 
-			1 / this.container.clientHeight 
-		);
-		this.composer.addPass( this.effectFXAA );
+		// this.effectFXAA = new ShaderPass( FXAAShader );
+		// this.effectFXAA.uniforms[ 'resolution' ].value.set(
+		// 	1 / this.container.clientWidth, 
+		// 	1 / this.container.clientHeight 
+		// );
+		// this.composer.addPass( this.effectFXAA );
 
 		//=/ Пост-процесс ===============================================
 		
@@ -216,7 +216,7 @@ class App{
 
 		let canvas = this.canvas;
 
-		this.camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, .1, 1000);
+		this.camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, .1, 180);
 		this.camera.position.set(0, 30, 80);
 		this.camera.name = "Main camera";
 		this.camera.lookAt(0,0,0);
@@ -265,9 +265,7 @@ class App{
 		this.composer.render();
 		
 		requestAnimationFrame(this.animate.bind(this));
-		// this.rotationXHelper.rotation.y += .01;
 
-		// console.log(this.rotationXHelper.rotation.y)
 	}
 
 	/**
@@ -419,7 +417,6 @@ class App{
 			this.triggerEvent('lost-intersect');
 		}
 
-		console.log(intersects.length);
 	}
 
 	/**
