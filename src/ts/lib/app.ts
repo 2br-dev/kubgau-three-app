@@ -162,6 +162,8 @@ class App{
 		this.renderpass = new RenderPass(this.scene, this.camera);
 		this.composer.addPass(this.renderpass);
 
+		let pixelRatio = window.devicePixelRatio;
+
 		// Подсветка
 		this.outlinepass = new OutlinePass(new THREE.Vector2(window.innerWidth, window.innerHeight), this.scene, this.camera);
 		this.outlinepass.edgeStrength = 1.0;
@@ -171,16 +173,13 @@ class App{
 		this.outlinepass.usePatternTexture = false;
 		this.outlinepass.visibleEdgeColor.set( 0xffffff );
 		this.outlinepass.hiddenEdgeColor.set( 0xffffff );
-		this.outlinepass.renderToScreen = true;
-		
+		this.outlinepass.renderToScreen = true;		
 		this.composer.addPass(this.outlinepass);
 
 		// this.effectFXAA = new ShaderPass( FXAAShader );
-		// this.effectFXAA.uniforms[ 'resolution' ].value.set(
-		// 	1 / this.container.clientWidth, 
-		// 	1 / this.container.clientHeight 
-		// );
-		// this.composer.addPass( this.effectFXAA );
+		// this.effectFXAA.uniforms[ 'resolution' ].value.x = 1 / ( window.innerWidth * pixelRatio );
+		// this.effectFXAA.uniforms[ 'resolution' ].value.y = 1 / ( window.innerHeight * pixelRatio );
+		// this.composer.addPass( this.effectFXAA ); 
 
 		//=/ Пост-процесс ===============================================
 		

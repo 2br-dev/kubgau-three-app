@@ -116,7 +116,7 @@ function getName(alias:string){
 		case "projector": name="Комплект проекционного оборудования" ;break;
 		case "screens-system": name="Система экранов спикера" ;break;
 		case "assistent-place": name="Место для ассистента" ;break;
-		case "server": name="Севрер" ;break;
+		case "server": name="Сервер" ;break;
 		case "sufler": name="Телесуфлёр" ;break;
 		case "sensor-screen": name="Сенсорный экран" ;break;
 	}
